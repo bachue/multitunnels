@@ -40,13 +40,13 @@ module Tunnels
   def self.help
     <<-HELP
 Usage:
-    tunnels [from to] [from2 to2] ...
+    multitunnels [from to] [from2 to2] ...
 
 Examples:
-    tunnels 443 3000
-    tunnels localhost:443 localhost:3000
-    tunnels https://:443 http://:3000
-    tunnels https://localhost:443 http://localhost:3000
+    multitunnels 443 3000
+    multitunnels localhost:443 localhost:3000
+    multitunnels https://:443 http://:3000
+    multitunnels https://localhost:443 http://localhost:3000
 
     HELP
   end

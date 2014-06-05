@@ -3,3 +3,4 @@ pkg/
 *~
 *.swp
 *.tmp
+.rake_tasks
