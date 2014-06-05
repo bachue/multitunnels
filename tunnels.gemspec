@@ -20,5 +20,7 @@ Gem::Specification.new do |s|
   # s.add_development_dependency "rspec"
   s.add_development_dependency 'rspec'
   s.add_development_dependency 'rr'
+  s.add_development_dependency 'rake'
   s.add_runtime_dependency 'eventmachine'
+  s.add_runtime_dependency 'http_parser.rb'
 end

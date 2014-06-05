@@ -1,11 +1,10 @@
 require 'tunnels/version'
+require 'tunnels/parser'
 require 'uri'
 require 'eventmachine'
 
 # most of code is from [thin-glazed](https://github.com/freelancing-god/thin-glazed).
 # Copyright © 2012, Thin::Glazed was a Rails Camp New Zealand project, and is developed and maintained by Pat Allan. It is released under the open MIT Licence.
-
-class ClientError < StandardError; end
 
 module Tunnels
   def self.run!(params)
@@ -33,8 +32,6 @@ module Tunnels
   rescue RuntimeError => e
     STDERR.puts e.message
     STDERR.puts "Maybe you should run on `sudo`"
-  rescue ClientError => e
-    STDERR.puts e.message
   end
 
   def self.help
@@ -132,16 +129,17 @@ Examples:
     end
 
     def receive_data(data)
-      unless data.nil?
-        client = nil
-        data.sub! /\r\nHost:\s*(.+?)\s*\r\n/i do
-          host, port = $1.split(':') if $1
-          client = client host, port
-          "\r\nHost: #{client.to_host}:#{client.to_port}\r\n"
-        end
+      parser << data unless data.nil?
+    end
 
-        client.send_data data
+    def send data
+      data.sub!(/\r\nHost:\s*(.+?)\s*\r\n/i) do
+        host, port = $1.split(':') if $1
+        self.last_client = client host, port
+        "\r\nHost: #{last_client.to_host}:#{last_client.to_port}\r\n"
       end
+
+      last_client.send_data data
     end
 
     def relay_from_client(data)
@@ -168,7 +166,7 @@ Examples:
                                           when :https
                                             EventMachine.connect to_host, to_port, HttpsClient, self, from_host, from_port, to_host, to_port
                                           else
-                                            raise ClientError.new "Cannot support scheme: #{to_scheme}"
+                                            STDERR.puts "Cannot support scheme: #{to_scheme}"
                                           end
       end
 
@@ -176,7 +174,7 @@ Examples:
         port = port.to_i
         search_client_by_host_and_port(host, port) ||
         search_client_by_host(host) ||
-        raise(ClientError.new "Cannot find a client for #{host}:#{port}")
+        STDERR.puts("Cannot find a client for #{host}:#{port}")
       end
 
       def search_client_by_host_and_port host, port
@@ -207,6 +205,24 @@ Examples:
 
       def clear_clients
         @clients.clear
+      end
+
+      def parser
+        Thread.current['parser'] ||= begin
+          parser = Parser.new
+          parser.on_complete do |data|
+            send data
+          end
+          parser
+        end
+      end
+
+      def last_client
+        Thread.current['client'] ||= client '127.0.0.1'
+      end
+
+      def last_client= client
+        Thread.current['client'] = client
       end
   end
 
