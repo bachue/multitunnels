@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+require 'tunnels'
+unless ARGV.size.even?
+  STDERR.puts Tunnels.help
+  exit!
+end
+
+begin
+  Tunnels.run!(ARGV)
+rescue ArgumentError
+  STDERR.puts Tunnels.help
+  exit!
+end
