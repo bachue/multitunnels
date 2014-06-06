@@ -6,6 +6,14 @@ require 'eventmachine'
 # most of code is from [thin-glazed](https://github.com/freelancing-god/thin-glazed).
 # Copyright © 2012, Thin::Glazed was a Rails Camp New Zealand project, and is developed and maintained by Pat Allan. It is released under the open MIT Licence.
 
+class ClientNotFound < StandardError; end
+
+module HTTPS
+  def post_init
+    start_tls
+  end
+end
+
 module Tunnels
   def self.run!(params)
     maps = parse_params params
@@ -116,9 +124,7 @@ Examples:
   end
 
   class HttpsClient < HttpClient
-    def post_init
-      start_tls
-    end
+    include HTTPS
   end
 
   class HttpProxy < EventMachine::Connection
@@ -133,13 +139,17 @@ Examples:
     end
 
     def send data
+      client = nil
       data.sub!(/\r\nHost:\s*(.+?)\s*\r\n/i) do
         host, port = $1.split(':') if $1
-        self.last_client = client host, port
-        "\r\nHost: #{last_client.to_host}:#{last_client.to_port}\r\n"
+        client = client host, port
+        "\r\nHost: #{client.to_host}:#{client.to_port}\r\n"
       end
 
-      last_client.send_data data
+      raise ClientNotFound.new "HTTP Header `Host' is required in HTTP/1.1" unless client
+      client.send_data data
+    rescue ClientNotFound => e
+      STDERR.puts e.message
     end
 
     def relay_from_client(data)
@@ -174,7 +184,7 @@ Examples:
         port = port.to_i
         search_client_by_host_and_port(host, port) ||
         search_client_by_host(host) ||
-        STDERR.puts("Cannot find a client for #{host}:#{port}")
+        raise(ClientNotFound.new "Cannot find a client for #{host}:#{port}")
       end
 
       def search_client_by_host_and_port host, port
@@ -216,20 +226,10 @@ Examples:
           parser
         end
       end
-
-      def last_client
-        Thread.current['client'] ||= client '127.0.0.1'
-      end
-
-      def last_client= client
-        Thread.current['client'] = client
-      end
   end
 
   class HttpsProxy < HttpProxy
-    def post_init
-      start_tls
-    end
+    include HTTPS
 
     def relay_from_client(data)
       super
