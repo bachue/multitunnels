@@ -11,6 +11,9 @@ class Parser
   def << data
     @raw << data
     @parser << data
+  rescue HTTP::Parser::Error => e
+    STDERR.puts e.message
+    reset
   end
 
   def on_complete

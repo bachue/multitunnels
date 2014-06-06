@@ -130,7 +130,7 @@ Examples:
   class HttpProxy < EventMachine::Connection
     def initialize(map)
       map.each do |from, to|
-        make_client from[1], from[2], to[0], to[1], to[2]
+        book_client from[1], from[2], to[0], to[1], to[2]
       end
     end
 
@@ -139,7 +139,8 @@ Examples:
     end
 
     def send data
-      client = nil
+      client, connection_close = nil, nil
+
       data.sub!(/\r\nHost:\s*(.+?)\s*\r\n/i) do
         host, port = $1.split(':') if $1
         client = client host, port
@@ -147,6 +148,16 @@ Examples:
       end
 
       raise ClientNotFound.new "HTTP Header `Host' is required in HTTP/1.1" unless client
+
+      data.sub!(/\r\nConnection:(.+?)\r\n/i) do
+        connection_close = true
+        "\r\nConnection: close\r\n"
+      end
+
+      unless connection_close
+        data.sub!(/\r\n\r\n/, "\r\nConnection: close\r\n\r\n")
+      end
+
       client.send_data data
     rescue ClientNotFound => e
       STDERR.puts e.message
@@ -158,7 +169,6 @@ Examples:
 
     def unbind
       close_all_connections
-      clear_clients
     end
 
     def unbind_client host, port
@@ -167,24 +177,44 @@ Examples:
     end
 
     private
-      def make_client from_host, from_port, to_scheme, to_host, to_port
+      def book_client from_host, from_port, to_scheme, to_host, to_port
         from_port, to_port = from_port.to_i, to_port.to_i
         @clients ||= Hash.new {|h, k| h[k] = {} }
-        @clients[from_host][from_port] =  case to_scheme
-                                          when :http
-                                            EventMachine.connect to_host, to_port, HttpClient, self, from_host, from_port, to_host, to_port
-                                          when :https
-                                            EventMachine.connect to_host, to_port, HttpsClient, self, from_host, from_port, to_host, to_port
-                                          else
-                                            STDERR.puts "Cannot support scheme: #{to_scheme}"
-                                          end
+        @clients[from_host][from_port] = {:from_host => from_host, :from_port => from_port, :to_scheme => to_scheme, :to_host => to_host, :to_port => to_port}
+      end
+
+      def client_type scheme
+        case scheme
+        when :http  then HttpClient
+        when :https then HttpsClient
+        else
+          raise ClientNotFound.new "Cannot support scheme: #{scheme}"
+        end
+      end
+
+      def make_client_for client_info
+        client =
+          EventMachine.connect  client_info[:to_host],
+                                client_info[:to_port],
+                                client_type(client_info[:to_scheme]),
+                                self,
+                                client_info[:from_host],
+                                client_info[:from_port],
+                                client_info[:to_host],
+                                client_info[:to_port]
+        @clients[client_info[:from_host]][client_info[:from_port]][:client] = client
+        client
+      rescue
+        puts $!.message
+        puts $@.join("\n")
       end
 
       def client host, port
         port = port.to_i
-        search_client_by_host_and_port(host, port) ||
-        search_client_by_host(host) ||
-        raise(ClientNotFound.new "Cannot find a client for #{host}:#{port}")
+        info =  search_client_by_host_and_port(host, port) ||
+                search_client_by_host(host) ||
+                raise(ClientNotFound.new "Cannot find a client for #{host}:#{port}")
+        info[:client] || make_client_for(info)
       end
 
       def search_client_by_host_and_port host, port
@@ -202,19 +232,17 @@ Examples:
       end
 
       def clear_client host, port
-        @clients[host].delete port.to_i
+        info = @clients[host][port.to_i]
+        info.delete :client if info
       end
 
       def close_all_connections
         @clients.each do |_, host|
-          host.each do |_, client|
-            client.close_connection
+          host.each do |_, info|
+            info[:client].close_connection if info[:client]
+            info.delete :client
           end
         end
-      end
-
-      def clear_clients
-        @clients.clear
       end
 
       def parser
